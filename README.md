@@ -4,6 +4,8 @@ This repository contains details for the data processing and analyses used to in
 * [DNA sequence processing with UNEAK](#dna-sequence-processing-with-uneak)
 * [DNA sequence processing with Stacks](#dna-sequence-processing-with-stacks)
 * [Population structure analysis](#population-structure-analysis)
+* [Kinship analysis](#kinship-analysis)
+* [Effective population size](#effective-population-size)
 # DNA sequence processing with UNEAK
 ## Filtering with KGD 
 All KGD R scripts are provided in the [KGD R package](https://github.com/AgResearch/KGD). Some modifications were made to lines in the R scripts, as outlined below:
@@ -65,7 +67,7 @@ module load cutadapt
 cutadapt -a AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC -a CGAGATCGGAAGAGCGGACTTTAAGC -o NZSP_1_fastq.gz SQ1792_HN7WGDRXY_s_1_fastq.gz
 cutadapt -a AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC -a CGAGATCGGAAGAGCGGACTTTAAGC -o NZSP_2_fastq.gz SQ1792_HN7WGDRXY_s_2_fastq.gz
 ```
-Check the trim worked using FastQC
+Check the trim worked using FastQC quality checking
 ```
 module purge
 module load FastQC
@@ -209,20 +211,17 @@ module purge
 module load MultiQC
 multiqc . #Summarises all FastQC reports for each sample into single report
 ```
-5. Run denovo Stacks wrapper for de novo assembly of sequences
-Samples are listed and categorised into populations depending on location of origin in the popmap file
+5. Run denovo Stacks wrapper for de novo assembly of sequences. Samples are listed and categorised into populations depending on location of origin in the popmap file
 ```
 module purge 
 module load Stacks
 denovo_map.pl -T 8 -M 2 -o ./denovo_M2/ --samples ./kmerfil_out3 --popmap ./Stacks_pop.txt 
 ```
-6. Make blacklist of loci with two or more SNPs
-The number of SNPs for each loci was counted and then counted loci were filtered in excel to create a blacklist of loci with two or more SNPs
+6. Make blacklist of loci with two or more SNPs. The number of SNPs for each loci was counted and then counted loci were filtered in excel to create a blacklist of loci with two or more SNPs
 ```
 awk -F"\t" '{print $1}' Test.txt | uniq -c > Newtest.txt #Counts duplicate loci in column 1
 ```
-7. Rerun last step of denovo_map wrapper (populations) with blacklist 
-Blacklist contains all loci with two or more SNPs
+7. Rerun last step of denovo_map wrapper (populations) with blacklist . Blacklist contains all loci with two or more SNPs
 Duplicate sample and three samples of unknown origin and date were also removed from the sample list
 ```
 module purge 
@@ -233,7 +232,7 @@ populations -P ./denovo_M2 -t 8 -M ./stacks_popF.txt -O ./pop_M2F_S3 -B Blacklis
 # Population structure analysis
 ## PCA
 ### Conduct PCA in Plink for the UNEAK and Stacks datasets
-Conduct PCA using Plink in R with the UNEAK and Stacks BED files to create eigenvector and eigenvalue files
+Conduct PCA using Plink in R with the UNEAK and Stacks BED files to create eigenvector and eigenvalue files. An additional PCA plot was created using the UNEAK dataset with a relatedness cutoff of 0.3.
 ```r
 #Set working directory in R and PATH in console
 shell("plink")
@@ -255,7 +254,7 @@ allt<-merge(in1,names)
 length(allt[,1]) #86
 head(allt)
 
-Eigenvalue<-scan(paste("C:\\Users\\strn001\\OneDrive - The University of Auckland\\Documents\\ANIKA\\NZSP\\Anika Output\\plink\\PlinkX\\PCA\\",file,".eigenval", sep=""))
+Eigenvalue<-scan(paste("C:\\path\\to\\file\\",file,".eigenval", sep=""))
 Eigenvalue
 pve<-data.frame(PC = 1:100, pve = Eigenvalue/sum(Eigenvalue)*100)
 head(pve)
@@ -300,7 +299,9 @@ distruct.py -K 1 --input=NZSP1_structure  --popfile=Structure_stacks_g1.txt --ou
 ```
 # Minor Allele Frequency (MAF) Distribution Plots
 Create MAF distribution plots for UNEAK and Stacks datasets
-Packages: ggplot2
+
+Packages: 
+* ggplot2
 ```r
 #load in Gulf and North sample IDs for the dataset (UNEAK or Stacks)
 Gulf_Samples<-read.table("C:\\path\\to\\file\\Gulf_Samples.txt")
@@ -355,7 +356,7 @@ for(i in 1:100) {
 }
 colnames(CountsG)<-c("1","2","3","4","5","6","7","8","9","10")
 
-#Generate bar plots with error bars- do for both locations
+#Calculate standard deviation and mean
 Sd<- sapply(CountsG, FUN = sd) #calculate standard deviation for all columns 
 sd<- as.data.frame(Sd)
 mean<-sapply(CountsG,FUN=mean) #calculate the mean for all columns
@@ -378,9 +379,10 @@ ggplot(data) +
   geom_errorbar( aes(x=range, ymin=mean-sd$Sd, ymax=mean+sd$Sd), width=0.2, size=1) +
   labs(x="MAF", y="Frequency") + ggtitle("Far North")
 ```
-# Kinship Analysis
+# Kinship analysis
 ## Sequoia
 Kinship assignment with Sequoia for the UNEAK and Stacks smaller datasets - sequoia R package only works using R v4.1.1
+
 Packages:
 * plyr
 * sequoia v2.3.5 (removed from CRAN repository; archived package)
@@ -398,11 +400,11 @@ GenoM <- GenoConvert(InFile = "C:\\path\\to\\file\\Sequoia_15_50.raw", InFormat 
 GetMaybeRel(GenoM = GenoM)
 ```
 ## Plink relatedness estimates
-BED files were also used to generate relatedness estimates for each pairing of individuals
+The UNEAK and Stacks filtered BED files were also used to generate relatedness estimates for each pairing of individuals in Plink
 ```r
 shell("plink --make-rel square --bfile NZSP25_50 --make-bed --out NZSP25_50_square") #Produce relatedness estimates in square matrix
 
-#Put the Plink relatedness estimates in similar format as KGD relatedness estimates:
+#Put the Plink relatedness estimates in a similar format as KGD relatedness estimates:
 Square <- read.table("C:\\path\\to\\file\\NZSP25_50_square.rel", strip.white=TRUE) #Plink relatedness estimates
 RelID <- read.table("C:\\path\\to\\file\\NZSP25_50_square.rel.id", strip.white=TRUE) #Plink relatedness IDs)
 Plink_vector <- as.vector(Square) 
@@ -413,3 +415,14 @@ Col1 <- rep(RelID$V1, each=len) #Repeat each sample individually
 head(Col1)
 Plinkrel<-cbind(Col1, Col2) 
 Plinkrel<-data.frame(Plinkrel)
+Plinkmerge<-paste(Plinkrel$Col1, Plinkrel$Col2, sep="_") #Merge sample pairs into one column, seperated by an underscore
+Plink<-cbind(Plinkmerge, Plink_vector) #Merge with relatedness estimates
+Plink <- as.data.frame(Plink)
+```
+# Effective population size
+VCF files were created in Plink using the smaller filtered Stacks and UNEAK BED files for conversion into GENEPOP files using PGDspider and then Ne estimation with NeEstimator
+```r
+#Set working directory in R and PATH in console
+shell("plink --bfile NZSP25_50 --recode vcf --out NZSP25_50") #Recode BED files into VCF
+shell("plink --bfile Stacks8_10_50 --recode vcf --out Stacks8_10_50")
+```
