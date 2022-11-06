@@ -77,9 +77,11 @@ fastqc NZSP_2_fastq.gz
 ## Assembly with Stacks
 Demulitplex and clean the DNA sequences with process_radtags
 ```
+cat NZSP_1_fastq.gz NZSP_2_fastq.gz > NZSP_fastq.gz #Combine both files of DNA sequences
+
 module purge
 module load Stacks
-process_radtags -1 ./NZSP_1_fastq.gz -2 ./NZSP_2_fastq.gz --renz-1 pstI --renz-2 mspI -c -q -b NZSP_Barcodes.txt -t 65 -o ./radtags_out2 #t= truncate to length 65
+process_radtags -1 ./NZSP_fastq.gz -2 ./NZSP_2_fastq.gz --renz-1 pstI --renz-2 mspI -c -q -b NZSP_Barcodes.txt -t 65 -o ./radtags_out2 #t= truncate to length 65
 ```
 ### Kmer filtering with Stacks
 1. Use R to print out lines of code to be used with Stacks for each sample
@@ -221,14 +223,24 @@ denovo_map.pl -T 8 -M 2 -o ./denovo_M2/ --samples ./kmerfil_out3 --popmap ./Stac
 ```
 awk -F"\t" '{print $1}' Test.txt | uniq -c > Newtest.txt #Counts duplicate loci in column 1
 ```
-7. Rerun last step of denovo_map wrapper (populations) with blacklist . Blacklist contains all loci with two or more SNPs
-Duplicate sample and three samples of unknown origin and date were also removed from the sample list
+7. Rerun last step of denovo_map wrapper (populations) with blacklist. 
+
+Blacklist contains all loci with two or more SNPs. A duplicate sample and three samples of unknown origin and date were also removed from the sample list, and an argument was added to create a VCF of the final Stacks dataset
 ```
 module purge 
 module load Stacks
 populations -P ./denovo_M2 -t 8 -M ./stacks_popF.txt -O ./pop_M2F_S3 -B Blacklist_2.txt --vcf --plink #Create population statistics and VCF of SNPs for specified samples and loci
 ```
-**Allelic depth and SNP/sample missingness filters were applied as described above for the [DNA sequence processing with UNEAK](#dna-sequence-processing-with-uneak) filtering**
+**KGD filtering was applied using modifications descibed above for [DNA sequence processing with UNEAK](#dna-sequence-processing-with-uneak)**
+
+One additional modification was made to run_KGD.R to change the format of the input file to a VCF rather than a UNEAK dataset:
+```r
+#Original:
+gform <- "uneak"
+#Modified:
+gform <- "VCF"
+```
+**Allelic depth and SNP/sample missingness filters were also applied as described above for the [DNA sequence processing with UNEAK](#dna-sequence-processing-with-uneak) filtering steps**
 # Population structure analysis
 ## PCA
 ### Conduct PCA in Plink for the UNEAK and Stacks datasets
@@ -289,7 +301,7 @@ Conduct fastStructure analysis on UNEAK and Stacks BED files produced by Plink f
 module purge
 module load fastStructure
 #Test K=1 to 5
-for k in {1..5}
+for k in {1..10}
 do
   structure.py -K $k --input=NZSP8_g1_m5 --output=NZSP1_structure
 done
@@ -419,10 +431,31 @@ Plinkmerge<-paste(Plinkrel$Col1, Plinkrel$Col2, sep="_") #Merge sample pairs int
 Plink<-cbind(Plinkmerge, Plink_vector) #Merge with relatedness estimates
 Plink <- as.data.frame(Plink)
 ```
+The relatedness estimates from Plink and KGD were also plotted for comparison. KGD pairings were organised in excel. All self-pairs in KGD were assigned to a relatedness of 1 and subsequently removed from the plot.
+```r
+KGDrel<-read.table("C:\\path\\to\\file\\Relatedness_KGD.txt", header=TRUE)
+KGDrel<-KGDrel[!(KGDrel$KGDrel=="1"),] #Remove self pairs
+KGDrel<-as.data.frame(KGDrel)
+KGDmerge<-paste(KGDrel$Indiv1, KGDrel$Indiv2, sep="_")
+KGD<-cbind(KGDmerge, KGDrel$KGDrel)
+colnames(Plink)[1] <- "Sample Pair"
+colnames(Plink)[2] <- "Plinkrel"
+colnames(KGD)[1] <- "Sample Pair"
+colnames(KGD)[2] <- "KGDrel"
+KGD <- as.data.frame(KGD)
+Plink <- as.data.frame(Plink)
+KGD_Plink<-merge(KGD, Plink, by="Sample Pair")
+colnames(KGD_Plink)[2]<- "KGDrel"
+
+KGD_Plink$KGDrel<-as.numeric(KGD_Plink$KGDrel)
+KGD_Plink$Plinkrel<-as.numeric(KGD_Plink$Plinkrel)
+
+plot(KGD_Plink$KGDrel, KGD_Plink$Plinkrel,xlab = "KGD rel", ylab = "Plink rel", col="cornflowerblue")
+```
 # Effective population size
 VCF files were created in Plink using the smaller filtered Stacks and UNEAK BED files for conversion into GENEPOP files using PGDspider and then Ne estimation with NeEstimator
 ```r
 #Set working directory in R and PATH in console
-shell("plink --bfile NZSP25_50 --recode vcf --out NZSP25_50") #Recode BED files into VCF
-shell("plink --bfile Stacks8_10_50 --recode vcf --out Stacks8_10_50")
+shell("plink --bfile NZSP25_50 --recode vcf --out NZSP25_50") #Recode UNEAK BED files into VCF
+shell("plink --bfile Stacks8_10_50 --recode vcf --out Stacks8_10_50")#Recode Stacks BED files into VCF
 ```
