@@ -4,6 +4,7 @@ This repository contains details for the data processing and analyses used to in
 * [DNA sequence processing with UNEAK](#dna-sequence-processing-with-uneak)
 * [DNA sequence processing with Stacks](#dna-sequence-processing-with-stacks)
 * [Population structure analysis](#population-structure-analysis)
+* [Minor allele frequency distribution plots](#minor-allele-frequency-distribution-plots)
 * [Kinship analysis](#kinship-analysis)
 * [Effective population size](#effective-population-size)
 # DNA sequence processing with UNEAK
@@ -309,8 +310,8 @@ done
 chooseK.py --input=NZSP1_structure #Identify the best K 
 distruct.py -K 1 --input=NZSP1_structure  --popfile=Structure_stacks_g1.txt --output=NZSPg1_distruct1.svg # Make fastStructure plot with the best K
 ```
-# Minor Allele Frequency (MAF) Distribution Plots
-Create MAF distribution plots for UNEAK and Stacks datasets
+# Minor allele frequency distribution plots
+Create minor allele frequency (MAF) distribution plots for UNEAK and Stacks datasets
 
 Packages: 
 * ggplot2
@@ -334,7 +335,6 @@ for(i in 1:100) {
   Subsamp$V2<-Subsamp$V1 #Make ID and family ID column (identical) for use in plink
   write.table(Subsamp, file=paste("C:\\path\\to\\directory\\Subsamp_N_",i,".txt", sep=""),sep="\t",row.names=FALSE,col.names=FALSE,quote = FALSE)
 }
-
 
 #Set working directory in R and PATH in console 
 #Move BED files into working directory
@@ -431,7 +431,7 @@ Plinkmerge<-paste(Plinkrel$Col1, Plinkrel$Col2, sep="_") #Merge sample pairs int
 Plink<-cbind(Plinkmerge, Plink_vector) #Merge with relatedness estimates
 Plink <- as.data.frame(Plink)
 ```
-The relatedness estimates from Plink and KGD were also plotted for comparison. KGD pairings were organised in excel. All self-pairs in KGD were assigned to a relatedness of 1 and subsequently removed from the plot.
+The relatedness estimates from Plink and KGD were also plotted for comparison. KGD pairings were organised in Excel (Microsoft). All self-pairs in KGD were assigned to a relatedness of 1 and subsequently removed from the plot.
 ```r
 KGDrel<-read.table("C:\\path\\to\\file\\Relatedness_KGD.txt", header=TRUE)
 KGDrel<-KGDrel[!(KGDrel$KGDrel=="1"),] #Remove self pairs
@@ -451,6 +451,15 @@ KGD_Plink$KGDrel<-as.numeric(KGD_Plink$KGDrel)
 KGD_Plink$Plinkrel<-as.numeric(KGD_Plink$Plinkrel)
 
 plot(KGD_Plink$KGDrel, KGD_Plink$Plinkrel,xlab = "KGD rel", ylab = "Plink rel", col="cornflowerblue")
+```
+## Sample homozygosity
+Expected and observed homozygosity values for the UNEAK dataset were plotted to investigate inbreeding  
+```r
+#Set working directory in R and PATH in console
+shell("plink --bfile NZSP25_50 --het") #Calculates observed and expected autosomal homozygous genotype counts for each sample in dataset
+#Import sample IDs, observed and expected homozygosity values into R
+plot(Homozygosity$O.HOM, Homozygosity$E.HOM, xlab = "O(HOM)", ylab = "E(HOM)") 
+text(Homozygosity$O.HOM, Homozygosity$E.HOM, labels = substring(Homozygosity$ID, 4, 6), cex = 0.8, pos = 1) #Add sample ID identifiers to plot points
 ```
 # Effective population size
 VCF files were created in Plink using the smaller filtered Stacks and UNEAK BED files for conversion into GENEPOP files using PGDspider and then Ne estimation with NeEstimator
