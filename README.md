@@ -411,7 +411,7 @@ shell("plink --bfile NZSP15_50 --recodeA --out Sequoia_25_50 ") #Make .raw file 
 GenoM <- GenoConvert(InFile = "C:\\path\\to\\file\\Sequoia_15_50.raw", InFormat = "raw")
 GetMaybeRel(GenoM = GenoM)
 ```
-## Plink relatedness estimates
+## Plink and KGD relatedness estimates
 The UNEAK and Stacks filtered BED files were also used to generate relatedness estimates for each pairing of individuals in Plink
 ```r
 shell("plink --make-rel square --bfile NZSP25_50 --make-bed --out NZSP25_50_square") #Produce relatedness estimates in square matrix
@@ -467,4 +467,10 @@ VCF files were created in Plink using the smaller filtered Stacks and UNEAK BED 
 #Set working directory in R and PATH in console
 shell("plink --bfile NZSP25_50 --recode vcf --out NZSP25_50") #Recode UNEAK BED files into VCF
 shell("plink --bfile Stacks8_10_50 --recode vcf --out Stacks8_10_50")#Recode Stacks BED files into VCF
+```
+# DNA Sexing
+A binomial test in R was used to investigate if sex biases in sample groups were statistically significant
+```r
+#example of binomial test for one sample group
+binom.test(x=11, n=29, alternative = 'two.sided') 
 ```
