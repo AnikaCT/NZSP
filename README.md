@@ -2,11 +2,22 @@
 This repository contains details for the data processing and analyses used to investigate the population structure and genetic diversity of the New Zealand storm petrel (NZSP).
 ### Contents:
 * [DNA sequence processing with UNEAK](#dna-sequence-processing-with-uneak)
+    * [Filtering with KGD](#filtering-with-kgd)
+    * [Allelic depth filter](#allelic-depth-filter)
+    * [Filtering with Plink in R](#filtering-with-plink-in-r)
 * [DNA sequence processing with Stacks](#dna-sequence-processing-with-stacks)
+    * [Adapter trimming](#adapter-trimming)
+    * [Assembly with Stacks](#assembly-with-stacks)
 * [Population structure analysis](#population-structure-analysis)
+    * [PCA](#pca)
+    * [FastStructure](#faststructure)
 * [Minor allele frequency distribution plots](#minor-allele-frequency-distribution-plots)
 * [Kinship analysis](#kinship-analysis)
+    * [Sequoia](#sequoia)
+    * [Plink and KGD relatedness estimates](#plink-and-kgd-relatedness-estimates)
+    * [Sample homozygosity](#sample-homozygosity)
 * [Effective population size](#effective-population-size)
+* [Sex bias statistical test](#sex-bias-statistical-test)
 # DNA sequence processing with UNEAK
 ## Filtering with KGD 
 All KGD R scripts are provided in the [KGD R package](https://github.com/AgResearch/KGD). Some modifications were made to lines in the R scripts, as outlined below:
@@ -16,7 +27,7 @@ Added an argument to writeVCF() to only include SNPs with Hardy_weinberg disequi
 #Original:
 writeVCF(outname="GHW05", ep=.001)
 #Modified:
-writeVCF(outname="GHW05X", ep=.001, snpsubset=which(HWdis.sep > -0.05))
+writeVCF(outname="GHW05", ep=.001, snpsubset=which(HWdis.sep > -0.05))
 ```
 ### GBS-Chip-Gmatrix.R
 Changed relatedness threshold so that all relatedness values would be included in HighRelatednessHWdgm.csv, rather than only the top most related pairs
@@ -24,24 +35,24 @@ Changed relatedness threshold so that all relatedness values would be included i
 #Original:
 uhirel <- which(GGBS5 > hirel.thresh & upper.tri(GGBS5), arr.ind = TRUE)
 #Modified:
-uhirel <- which(GGBS5 > -5 & upper.tri(GGBS5), arr.ind = TRUE)
+uhirel <- which(GGBS5 > -5 & upper.tri(GGBS5), arr.ind = TRUE) #Used arbitrarily low number so that all would meet the threshold
 ```
 ## Allelic depth filter
-Allelic depth filter of 8 was applied to the VCF (GHW05.vcf) produced by KGD
+Allelic depth filter of 8 was applied to the VCF (GHW05.vcf) produced by KGD using [BCFtools](https://github.com/samtools/bcftools)  
 ```
 module load BCFtools
 bgzip GHW05.vcf
 bcftools index GHW05.vcf.gz 
-bcftools filter -S . -i 'FMT/AD[*:*]>7' -O v -o GHW05depth8.vcf GHW05full.vcf.gz #Genotypes are only included if at least one of the AD fields is greater than 7 (depth of 8)
+bcftools filter -S . -i 'FMT/AD[*:*]>7' -O v -o GHW05depth8.vcf GHW05full.vcf.gz #Genotypes are only included if an AD field is greater than 7 (depth of 8)
 ```
 ## Filtering with Plink in R
 Files were filtered using Plink commands in R
 ### Preparing VCF file for Plink
-Currently, each SNP is given its own chromosome. This will clean up the sample names and make all SNPs on chromosome 1.
+Currently, each SNP has been given its own chromosome. This will clean up the sample names and put all SNPs on chromosome 1 so that the VCF works smoothly in Plink later on.
 ```
-sed -i 's/_merged_2_0_X4//g' GHW05.vcf  #Tidy up the sample names
-head -n 15 GHW05.vcf > GHW05head.vcf #Take just the header
-awk 'BEGIN {OFS="\t"}; NR>22 {$1=1; print}' GHW05.vcf > GHW05edit.vcf #Replace all first column chrosome values with 1 and add tab spaces, also removes header
+sed -i 's/_merged_2_0_X4//g' GHW05depth8.vcf  #Tidy up the sample names
+head -n 15 GHW05depth8.vcf > GHW05head.vcf #Take just the header
+awk 'BEGIN {OFS="\t"}; NR>15 {$1=1; print}' GHW05.vcf > GHW05edit.vcf #Replace all first column chrosome values with 1 and add tab spaces, also removes the header
 cat GHW05head.vcf GHW05edit.vcf > GHW05full.vcf #append files together to create the full, cleaned up VCF file
 ```
 ### Applying SNP and sample missingness filters
@@ -61,14 +72,14 @@ shell("plink --bfile NZSP25 --out NZSP15_50 --mind 0.5 --make-bed") #Filter maxi
 ```
 # DNA sequence processing with Stacks
 ## Adapter trimming
-Trim adapters off of both raw DNA sequence files using cutadapt
+Trim adapters off of both raw DNA sequence files using [cutadapt](#https://github.com/marcelm/cutadapt)
 ```
 module purge
 module load cutadapt
 cutadapt -a AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC -a CGAGATCGGAAGAGCGGACTTTAAGC -o NZSP_1_fastq.gz SQ1792_HN7WGDRXY_s_1_fastq.gz
 cutadapt -a AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC -a CGAGATCGGAAGAGCGGACTTTAAGC -o NZSP_2_fastq.gz SQ1792_HN7WGDRXY_s_2_fastq.gz
 ```
-Check the trim worked using FastQC quality checking
+Check the trim worked using [FastQC](#https://github.com/s-andrews/FastQC) quality checking
 ```
 module purge
 module load FastQC
@@ -76,163 +87,165 @@ fastqc NZSP_1_fastq.gz
 fastqc NZSP_2_fastq.gz 
 ```
 ## Assembly with Stacks
-Demulitplex and clean the DNA sequences with process_radtags
+1. Demulitplex and clean the DNA sequences with process_radtags
 ```
-cat NZSP_1_fastq.gz NZSP_2_fastq.gz > NZSP_fastq.gz #Combine both files of DNA sequences
+cat NZSP_1_fastq.gz NZSP_2_fastq.gz > NZSP_fastq.gz #Combine DNA sequence files (files are not paired)
 
 module purge
 module load Stacks
-process_radtags -1 ./NZSP_fastq.gz -2 ./NZSP_2_fastq.gz --renz-1 pstI --renz-2 mspI -c -q -b NZSP_Barcodes.txt -t 65 -o ./radtags_out2 #t= truncate to length 65
+process_radtags -f ./NZSP_fastq.gz --renz-1 pstI --renz-2 mspI -c -q -b NZSP_Barcodes.txt -t 65 -o ./radtags_single #Truncate to length of 65 65bp
 ```
-### Kmer filtering with Stacks
-1. Use R to print out lines of code to be used with Stacks for each sample
+2. Use R to print out lines of code to be used with Stacks kmer filter for each sample
 ```r
 #Print out lines of code in R for each sample
-df<-as.data.frame(All_sheep) #Create dataframe of each sample name from barcode file
+df<-as.data.frame(All_samples) #Create dataframe of each sample name from barcode file
 ls<-df[!duplicated(df$V1), ] #Remove duplicate samples
 ls<-as.list(ls)
 
 for(i in ls) {
-    print(paste("./kmer_filter -1 ./radtags_out/",i,".1.fq.gz -2 ./radtags_out/",i,".2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant", sep=""), quote = FALSE)
+    print(paste("./kmer_filter -1 ./radtags_single/",i,".fq.gz -i gzfastq -o ./kmerfil_single/ --rare --abundant", sep=""), quote = FALSE)
 }
 ```
-2. Use printed lines of code to run a kmer filter on each sample
+3. Use printed lines of code to run a kmer filter on each sample
 <details><summary>Kmer filter code</summary>
   <p>
     
 ```
 module load Stacks
-kmer_filter -1 ./radtags_out/K64513.1.fq.gz -2 ./radtags_out/K64513.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64514.1.fq.gz -2 ./radtags_out/K64514.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64515.1.fq.gz -2 ./radtags_out/K64515.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64516.1.fq.gz -2 ./radtags_out/K64516.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64517.1.fq.gz -2 ./radtags_out/K64517.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64518.1.fq.gz -2 ./radtags_out/K64518.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64519.1.fq.gz -2 ./radtags_out/K64519.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64520.1.fq.gz -2 ./radtags_out/K64520.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64521.1.fq.gz -2 ./radtags_out/K64521.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64522.1.fq.gz -2 ./radtags_out/K64522.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64523.1.fq.gz -2 ./radtags_out/K64523.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64524.1.fq.gz -2 ./radtags_out/K64524.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64525.1.fq.gz -2 ./radtags_out/K64525.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64526.1.fq.gz -2 ./radtags_out/K64526.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64527.1.fq.gz -2 ./radtags_out/K64527.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64528.1.fq.gz -2 ./radtags_out/K64528.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64529.1.fq.gz -2 ./radtags_out/K64529.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64530.1.fq.gz -2 ./radtags_out/K64530.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64531.1.fq.gz -2 ./radtags_out/K64531.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64532.1.fq.gz -2 ./radtags_out/K64532.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64533.1.fq.gz -2 ./radtags_out/K64533.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64534.1.fq.gz -2 ./radtags_out/K64534.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64535.1.fq.gz -2 ./radtags_out/K64535.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64536.1.fq.gz -2 ./radtags_out/K64536.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64537.1.fq.gz -2 ./radtags_out/K64537.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64538.1.fq.gz -2 ./radtags_out/K64538.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64539.1.fq.gz -2 ./radtags_out/K64539.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64540.1.fq.gz -2 ./radtags_out/K64540.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64541.1.fq.gz -2 ./radtags_out/K64541.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64542.1.fq.gz -2 ./radtags_out/K64542.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64543.1.fq.gz -2 ./radtags_out/K64543.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64544.1.fq.gz -2 ./radtags_out/K64544.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64545.1.fq.gz -2 ./radtags_out/K64545.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64546.1.fq.gz -2 ./radtags_out/K64546.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64547.1.fq.gz -2 ./radtags_out/K64547.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64548.1.fq.gz -2 ./radtags_out/K64548.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64549.1.fq.gz -2 ./radtags_out/K64549.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64550.1.fq.gz -2 ./radtags_out/K64550.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64551.1.fq.gz -2 ./radtags_out/K64551.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64552.1.fq.gz -2 ./radtags_out/K64552.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64553.1.fq.gz -2 ./radtags_out/K64553.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64554.1.fq.gz -2 ./radtags_out/K64554.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64555.1.fq.gz -2 ./radtags_out/K64555.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64556.1.fq.gz -2 ./radtags_out/K64556.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64557.1.fq.gz -2 ./radtags_out/K64557.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64558.1.fq.gz -2 ./radtags_out/K64558.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64559.1.fq.gz -2 ./radtags_out/K64559.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64560.1.fq.gz -2 ./radtags_out/K64560.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64561.1.fq.gz -2 ./radtags_out/K64561.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64562.1.fq.gz -2 ./radtags_out/K64562.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64563.1.fq.gz -2 ./radtags_out/K64563.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64564.1.fq.gz -2 ./radtags_out/K64564.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64565.1.fq.gz -2 ./radtags_out/K64565.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64566.1.fq.gz -2 ./radtags_out/K64566.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64567.1.fq.gz -2 ./radtags_out/K64567.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64568.1.fq.gz -2 ./radtags_out/K64568.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64569.1.fq.gz -2 ./radtags_out/K64569.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64570.1.fq.gz -2 ./radtags_out/K64570.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64571.1.fq.gz -2 ./radtags_out/K64571.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64572.1.fq.gz -2 ./radtags_out/K64572.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64573.1.fq.gz -2 ./radtags_out/K64573.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64574.1.fq.gz -2 ./radtags_out/K64574.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64575.1.fq.gz -2 ./radtags_out/K64575.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64576.1.fq.gz -2 ./radtags_out/K64576.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64577.1.fq.gz -2 ./radtags_out/K64577.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64578.1.fq.gz -2 ./radtags_out/K64578.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64579.1.fq.gz -2 ./radtags_out/K64579.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64580.1.fq.gz -2 ./radtags_out/K64580.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64581.1.fq.gz -2 ./radtags_out/K64581.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64582.1.fq.gz -2 ./radtags_out/K64582.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64583.1.fq.gz -2 ./radtags_out/K64583.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64584.1.fq.gz -2 ./radtags_out/K64584.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64585.1.fq.gz -2 ./radtags_out/K64585.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64586.1.fq.gz -2 ./radtags_out/K64586.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64587.1.fq.gz -2 ./radtags_out/K64587.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64588.1.fq.gz -2 ./radtags_out/K64588.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64589.1.fq.gz -2 ./radtags_out/K64589.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64590.1.fq.gz -2 ./radtags_out/K64590.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64591.1.fq.gz -2 ./radtags_out/K64591.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64592.1.fq.gz -2 ./radtags_out/K64592.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64593.1.fq.gz -2 ./radtags_out/K64593.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64594.1.fq.gz -2 ./radtags_out/K64594.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64595.1.fq.gz -2 ./radtags_out/K64595.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64596.1.fq.gz -2 ./radtags_out/K64596.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64597.1.fq.gz -2 ./radtags_out/K64597.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64598.1.fq.gz -2 ./radtags_out/K64598.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64599.1.fq.gz -2 ./radtags_out/K64599.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64600.1.fq.gz -2 ./radtags_out/K64600.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64601.1.fq.gz -2 ./radtags_out/K64601.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64602.1.fq.gz -2 ./radtags_out/K64602.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64603.1.fq.gz -2 ./radtags_out/K64603.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64604.1.fq.gz -2 ./radtags_out/K64604.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
-kmer_filter -1 ./radtags_out/K64605.1.fq.gz -2 ./radtags_out/K64605.2.fq.gz -i gzfastq -o ./kmerfil_out/ --rare --abundant
+kmer_filter -f ./radtags_single/K64513.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64514.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64515.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64516.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64517.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64518.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64519.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64520.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64521.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64522.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64523.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64524.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64525.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64526.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64527.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64528.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64529.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64530.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64531.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64532.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64533.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64534.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64535.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64536.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64537.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64538.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64539.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64540.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64541.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64542.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64543.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64544.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64545.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64546.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64547.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64548.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64549.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64550.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64551.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64552.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64553.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64554.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64555.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64556.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64557.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64558.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64559.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64560.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64561.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64562.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64563.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64564.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64565.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64566.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64567.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64568.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64569.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64570.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64571.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64572.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64573.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64574.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64575.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64576.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64577.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64578.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64579.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64580.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64581.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64582.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64583.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64584.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64585.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64586.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64587.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64588.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64589.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64590.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64591.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64592.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64593.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64594.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64595.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64596.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64597.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64598.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64599.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64600.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64601.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64602.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64603.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64604.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
+kmer_filter -f ./radtags_single/K64605.fq.gz  -i gzfastq -o ./kmerfil_single/ --rare --abundant
 ```
 </p>
 </details>
  
-3. Clean up file names for next steps
+4. Clean up kmer filtered file names for next steps
 ```
+cd kmerfil_single
 for filename in *.fq; do      [ -f "$filename" ] || continue;     mv "$filename" "${filename//fil./}";  done #remove fil. from file names
 ```
-4. Optional quality check of sequences 
+5. Optional quality check of sequences 
 ```
+mkdir fastqc
 module purge
 module load FastQC
-fastqc *1.fq -o fastqc
-fastqc *2.fq -o fastqc
+fastqc *.fq -o fastqc
 
+cd fastqc
 module purge 
 module load MultiQC
 multiqc . #Summarises all FastQC reports for each sample into single report
 ```
-5. Run denovo Stacks wrapper for de novo assembly of sequences. Samples are listed and categorised into populations depending on location of origin in the popmap file
+6. Run denovo Stacks wrapper for de novo assembly of sequences. Samples are listed and categorised into populations depending on location of origin in the popmap file
 ```
 module purge 
 module load Stacks
 denovo_map.pl -T 8 -M 2 -o ./denovo_M2/ --samples ./kmerfil_out3 --popmap ./Stacks_pop.txt 
 ```
-6. Make blacklist of loci with two or more SNPs. The number of SNPs for each loci was counted and then counted loci were filtered in excel to create a blacklist of loci with two or more SNPs
+7. Make blacklist of loci with two or more SNPs. The number of SNPs for each loci was counted and then counted loci were filtered in excel to create a blacklist of loci with two or more SNPs
 ```
-awk -F"\t" '{print $1}' Test.txt | uniq -c > Newtest.txt #Counts duplicate loci in column 1
+awk -F"\t" '{print $1}' Test.txt | uniq -c > Counts.txt #Counts duplicate loci in column 1
 ```
 7. Rerun last step of denovo_map wrapper (populations) with blacklist. 
 
-Blacklist contains all loci with two or more SNPs. A duplicate sample and three samples of unknown origin and date were also removed from the sample list, and an argument was added to create a VCF of the final Stacks dataset
+The blacklist contains all loci with two or more SNPs. An argument was also added to create a VCF of the final Stacks dataset
 ```
 module purge 
 module load Stacks
-populations -P ./denovo_M2 -t 8 -M ./stacks_popF.txt -O ./pop_M2F_S3 -B Blacklist_2.txt --vcf --plink #Create population statistics and VCF of SNPs for specified samples and loci
+populations -P ./denovo_M2 -t 8 -M ./stacks_pop.txt -O ./pop_M2F_S3 -B Blacklist_2.txt --vcf --plink #Create population statistics and VCF of SNPs for specified samples and loci
 ```
-**KGD filtering was applied using modifications descibed above for [DNA sequence processing with UNEAK](#dna-sequence-processing-with-uneak)**
+**Allelic depth filtering were applied as described above for the UNEAK [Allelic depth filter](#allelic-depth-filter)**
+**KGD filtering was applied using modifications as descibed above in [Filtering with KGD](#filtering-with-kgd)**
 
 One additional modification was made to run_KGD.R to change the format of the input file to a VCF rather than a UNEAK dataset:
 ```r
@@ -241,7 +254,9 @@ gform <- "uneak"
 #Modified:
 gform <- "VCF"
 ```
-**Allelic depth and SNP/sample missingness filters were also applied as described above for the [DNA sequence processing with UNEAK](#dna-sequence-processing-with-uneak) filtering steps**
+**Further SNP/Sample filtering was also conducted as described above in [Filtering with Plink in R](#filtering-with-plink-in-r), using slightly different filtering thresholds**
+
+One dataset was filtered for a maximum of 10% SNP missingness and 50% sample missingness, the other for a maximum of 2% SNP missingness and 50% sample missingness.
 # Population structure analysis
 ## PCA
 ### Conduct PCA in Plink for the UNEAK and Stacks datasets
@@ -296,7 +311,7 @@ points(allt_Hauturu$V3,allt_Hauturu$V4,col=G_colour, pch=19, cex=1.2)
 text(allt$V3, allt$V4, labels = substring(names$ID, 4, 6), cex = 0.8, pos = 1)
 ```
 ## FastStructure
-Conduct fastStructure analysis on UNEAK and Stacks BED files produced by Plink filtering
+Conduct [fastStructure](https://github.com/rajanil/fastStructure) analysis on UNEAK and Stacks BED files produced by Plink filtering
 ```
 #Move filtered BED files (bed, bim and fam) file into directory
 module purge
@@ -343,11 +358,11 @@ shell("plink")
 #Generate MAF statistics for the 100 subsamples using the filtered UNEAK or Stacks BED files 
 for (i in 1:100) {
   shell(paste("plink --bfile NZSP25_50 --out NZSP_G",i," --keep Subsamp_G_",i,".txt --make-bed", sep="")) #Keep only the Gulf subsample, remove all other samples
-  shell(paste("plink --bfile NZSP_G",i," --freq --out NZSP_G",i, sep="")) #Generate MAFs stats
+  shell(paste("plink --bfile NZSP_G",i," --freq --out NZSP_G",i, sep="")) #Generate MAF stats
 }
 for (i in 1:100) {
   shell(paste("plink --bfile NZSP25_50 --out NZSP_N",i," --keep Subsamp_N_",i,".txt --make-bed", sep="")) #Keep only the North subsample, remove all other samples
-  shell(paste("plink --bfile NZSP_N",i," --freq --out NZSP_N",i, sep="")) #Generate MAFs stats
+  shell(paste("plink --bfile NZSP_N",i," --freq --out NZSP_N",i, sep="")) #Generate MAF stats
 }
 
 #Generate histogram counts for each subsample
@@ -357,14 +372,14 @@ CountsG<-data.frame() #create empty data frame
 for(i in 1:100) {
   MAF<-read.table(paste("C:\\path\\to\\directory\\NZSP_N",i,".frq", sep=""), header = TRUE)
   hist_info <- hist(MAF$MAF)
-  CountsN<-rbind(CountsN, hist_info$counts)
+  CountsN<-rbind(CountsN, hist_info$counts) #Add histogram counts as row to dataframe
 }
 colnames(CountsN)<-c("1","2","3","4","5","6","7","8","9","10")
 
 for(i in 1:100) {
   MAF<-read.table(paste("C:\\path\\to\\directory\\NZSP_G",i,".frq", sep=""), header = TRUE)
   hist_info <- hist(MAF$MAF)
-  CountsG<-rbind(CountsG, hist_info$counts)
+  CountsG<-rbind(CountsG, hist_info$counts) #Add histogram counts as row to dataframe
 }
 colnames(CountsG)<-c("1","2","3","4","5","6","7","8","9","10")
 
@@ -393,7 +408,7 @@ ggplot(data) +
 ```
 # Kinship analysis
 ## Sequoia
-Kinship assignment with Sequoia for the UNEAK and Stacks smaller datasets - sequoia R package only works using R v4.1.1
+Kinship assignment with [Sequoia](https://github.com/JiscaH/sequoia) for the UNEAK and Stacks smaller datasets - the Sequoia R package only works using R v4.1.1
 
 Packages:
 * plyr
@@ -418,7 +433,7 @@ shell("plink --make-rel square --bfile NZSP25_50 --make-bed --out NZSP25_50_squa
 
 #Put the Plink relatedness estimates in a similar format as KGD relatedness estimates:
 Square <- read.table("C:\\path\\to\\file\\NZSP25_50_square.rel", strip.white=TRUE) #Plink relatedness estimates
-RelID <- read.table("C:\\path\\to\\file\\NZSP25_50_square.rel.id", strip.white=TRUE) #Plink relatedness IDs)
+RelID <- read.table("C:\\path\\to\\file\\NZSP25_50_square.rel.id", strip.white=TRUE) #Plink relatedness IDs
 Plink_vector <- as.vector(Square) 
 len<-length(RelID$V1)
 Col2 <- rep(RelID$V1, len) #Replicate each sample in order by length of ID list
@@ -431,7 +446,7 @@ Plinkmerge<-paste(Plinkrel$Col1, Plinkrel$Col2, sep="_") #Merge sample pairs int
 Plink<-cbind(Plinkmerge, Plink_vector) #Merge with relatedness estimates
 Plink <- as.data.frame(Plink)
 ```
-The relatedness estimates from Plink and KGD were also plotted for comparison. KGD pairings were organised in Excel (Microsoft). All self-pairs in KGD were assigned to a relatedness of 1 and subsequently removed from the plot.
+The relatedness estimates from Plink and KGD were also plotted for comparison. KGD pairings were organised in Excel (Microsoft). All self-pairs in KGD were originally assigned to a relatedness of 1 and subsequently removed from the plot.
 ```r
 KGDrel<-read.table("C:\\path\\to\\file\\Relatedness_KGD.txt", header=TRUE)
 KGDrel<-KGDrel[!(KGDrel$KGDrel=="1"),] #Remove self pairs
@@ -466,9 +481,9 @@ VCF files were created in Plink using the smaller filtered Stacks and UNEAK BED 
 ```r
 #Set working directory in R and PATH in console
 shell("plink --bfile NZSP25_50 --recode vcf --out NZSP25_50") #Recode UNEAK BED files into VCF
-shell("plink --bfile Stacks8_10_50 --recode vcf --out Stacks8_10_50")#Recode Stacks BED files into VCF
+shell("plink --bfile Stacks8_10_50 --recode vcf --out Stacks8_10_50") #Recode Stacks BED files into VCF
 ```
-# DNA Sexing
+# Sex bias statistical test
 A binomial test in R was used to investigate if sex biases in sample groups were statistically significant
 ```r
 #example of binomial test for one sample group
