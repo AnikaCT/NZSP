@@ -72,7 +72,7 @@ shell("plink --bfile NZSP25 --out NZSP15_50 --mind 0.5 --make-bed") #Filter maxi
 ```
 # DNA sequence processing with Stacks
 ## Adapter trimming
-Trim adapters off of both raw DNA sequence files using [cutadapt](#https://github.com/marcelm/cutadapt)
+Trim adapters off of both raw DNA sequence files using [cutadapt](https://github.com/marcelm/cutadapt)
 ```
 module purge
 module load cutadapt
