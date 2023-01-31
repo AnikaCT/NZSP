@@ -17,7 +17,10 @@ This repository contains details for the data processing and analyses used to in
     * [Plink and KGD relatedness estimates](#plink-and-kgd-relatedness-estimates)
     * [Sample homozygosity](#sample-homozygosity)
 * [Effective population size](#effective-population-size)
-* [Sex bias statistical test](#sex-bias-statistical-test)
+* [Bioinformatic Sexing](#bioinformatic-sexing)
+   * [Sex bias statistical test](#sex-bias-statistical-test)
+   * [Identifying Z-linked SNPs](#identifying-z-linked-snps)
+   * [Extracting and analysing Z-linked SNPs](#extracting-and-analysing-z-linked-snps)
 # DNA sequence processing with UNEAK
 ## Filtering with KGD 
 All KGD R scripts are provided in the [KGD R package](https://github.com/AgResearch/KGD). Some modifications were made to lines in the R scripts, as outlined below:
@@ -270,11 +273,15 @@ shell("plink  --allow-no-sex --make-rel  --bfile Stack10_50 --out Stacks_10_50  
 ### Create PCA plots in R for both datasets
 ```r
 file<-"NZSP25_50_rel03" #UNEAK or Stacks dataset name
-in1<-read.table(paste("C:\\path\\to\\file\\",file,".eigenvec", sep=""))
+Key <- read.table("C:\\path\\to\\file\\Location_all.txt", header = TRUE) #Key with all samples and locations, IDs in column 1 and locations in column 2
+
+in1<-read.table(paste("C:\\path\\to\\",file,".eigenvec", sep=""))
 plot(in1$V3,in1$V4)
 
-#Requires sample key file with ID column and location column for each sample
-names<-read.table("C:\\path\\to\\file\\samples_25_rel03.txt")
+df<-read.table(paste("C:\\path\\to\\",file,".rel.id", sep=""), header = FALSE) #load in IDs for particular dataset
+colnames(df)[2] <- "ID"
+names <- merge(df, Key, by="ID") #extract matching locations for samples in dataset
+names<-subset(names, select = c("ID", "Location")) #Gets rid of duplicate column
 head(names)
 colnames(in1)[2] <- "ID"
 colnames(names)[1] <- "ID"
@@ -282,7 +289,7 @@ allt<-merge(in1,names)
 length(allt[,1]) #86
 head(allt)
 
-Eigenvalue<-scan(paste("C:\\path\\to\\file\\",file,".eigenval", sep=""))
+Eigenvalue<-scan(paste("C:\\path\\to\\",file,".eigenval", sep=""))
 Eigenvalue
 pve<-data.frame(PC = 1:100, pve = Eigenvalue/sum(Eigenvalue)*100)
 head(pve)
@@ -296,9 +303,9 @@ allt_North<-subset(allt, V2 =="Far_North")
 length(allt_North[,1]) #27
 
 #Plot just the Far North samples with increased point size (cex) and in triangle shape (pch)
-plot(allt_North$V3,allt_North$V4,pch=17,xlab = (paste0("PC1 (", signif(pve$pve[1], digits = 3), "%)")), ylab = (paste0("PC2 (", signif(pve$pve[2], digits = 3), "%)")), col=N_colour, ylim = range(allt$V4), xlim = range(allt$V3), cex=1.2)
-legend("topright", c("Far North", "Hauraki Gulf"), 
-       col=c(N_colour, G_colour), pch=c(17, 19))
+plot(allt_North$V3,allt_North$V4,pch=17,xlab = (paste0("PC1 (", signif(pve$pve[1], digits = 3), "%)")), ylab = (paste0("PC2 (", signif(pve$pve[2], digits = 3), "%)")), col=N_colour, ylim = range(allt$V4), xlim = range(allt$V3), cex=1.5, cex.lab = 1.5)
+legend("topleft", c("Far North", "Hauraki Gulf"), 
+       col=c(N_colour, G_colour), pch=c(17, 19), cex = 1.5)
 
 #Plot Hauraki samples as well with circle shape and increased size
 allt_Hauturu<-subset(allt, V2 =="Hauraki_Gulf")
@@ -310,6 +317,7 @@ points(allt_Hauturu$V3,allt_Hauturu$V4,col=G_colour, pch=19, cex=1.2)
 #pos = position of label; 1 under, 2 left, 3 top and 4 right
 text(allt$V3, allt$V4, labels = substring(names$ID, 4, 6), cex = 0.8, pos = 1)
 ```
+PCA process repeated using only samples from the Hauraki Gulf, for fine-scale structure analysis, as well as based on DNA sexing results, rather than location. 
 ## FastStructure
 Conduct [fastStructure](https://github.com/rajanil/fastStructure) analysis on UNEAK and Stacks BED files produced by Plink filtering
 ```
@@ -483,9 +491,72 @@ VCF files were created in Plink using the smaller filtered Stacks and UNEAK BED 
 shell("plink --bfile NZSP25_50 --recode vcf --out NZSP25_50") #Recode UNEAK BED files into VCF
 shell("plink --bfile Stacks8_10_50 --recode vcf --out Stacks8_10_50") #Recode Stacks BED files into VCF
 ```
-# Sex bias statistical test
+# Bioinformatic Sexing
+## Sex bias statistical test
 A binomial test in R was used to investigate if sex biases in sample groups were statistically significant
 ```r
 #example of binomial test for one sample group
 binom.test(x=11, n=29, alternative = 'two.sided') 
+```
+## Identifying Z-linked SNPs
+NZSP sequences were aligned to zebra finch and European golden eagle genomes to identify putative Z-linked SNPs aligned with either or both genomes
+```
+module purge
+module load BLAST
+
+#extract single lines from hapmap file
+sed -e '/hit/,+1d' HapMap.fas.txt > HapMapQuery.fas
+#blast against nucleotide database
+blastn -query HapMapQuery.fas.txt -db nt -outfmt 6 -out NZSP_blast.txt
+
+#BWA-MEM alignment
+#download zebra finch assembly from NCBI https://www.ncbi.nlm.nih.gov/assembly/GCF_003957565.2/#/st
+gunzip Zebrafinch.fna.gz #unzip fna
+module load BWA
+bwa index Zebrafinch.fna #index reference file
+bwa mem Zebrafinch.fna HapMapQuery.fna > NZSP_ZebraBWA.sam #Align genomes
+#Extract just the hits
+awk 'NR>200 {print}' NZSP_ZebraBWA.sam > NZSP_ZebraBWAhits.sam #Remove header
+awk '$4!= 0 {print}' NZSP_ZebraBWAhits.sam > NZSP_ZebraBWAhits1.sam
+#Repeat alignment with golden eagle genome: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8499043/ 
+
+#Filter on Z-linked SNPs
+awk '$3=="NC_044241.2" {print}' NZSP_ZebraBWAhits1.sam > NZSPZebra_chrZ.sam #Extract aalignments with chr Z
+awk '{print $1}'  NZSPZebra_chrZ.sam > NZSPZebra_Z_SNPs.txt #Get first column for list of SNPs
+sed -i.bak 's/_query.*//g' NZSPZebra_Z_SNPs.txt #cleaning to remove "_query_*"
+#Repeat with golden eagle alignment 
+awk '$3=="LR606180.1" {print}' NZSP_EagleBWAhits.sam > NZSP_EagleBWA_chrZ.sam
+awk '{print $1}'  NZSP_EagleBWA_chrZ.sam > NZSPEagle_Z_SNPs.txt
+sed -i.bak 's/_query.*//g' NZSPEagle_Z_SNPs.txt
+#Extract SNPs that are the same in both alignments
+comm -12 <(sort NZSPEagle_Z_SNPs.txt) <(sort NZSPZebra_Z_SNPs.txt) > Zchr_SNPs_EagleZebra.txt
+```
+## Extracting and analysing Z-linked SNPs
+Putative Z-linked SNPs were analysed for homozygosity in NZSP individuals to see if sex could be bioinformatically determined, repeated for just eagle Z-linked SNPS and eagle/zebra finch Z-linked SNPs
+```r
+rm(list=ls())
+setwd("~/path/to/directory/Plink1")
+shell("plink")
+
+#Extraction and filtering in Plink
+shell("plink --file trial_NZSP --extract NZSPEagle_Z_SNPs.txt --out Eagle_chrZ_all --make-bed")
+shell("plink --bfile Eagle_chrZ_all --out EglZ_15 --make-bed --geno 0.15") #filter max missingness per SNP
+file <-"EglZ_15_50" 
+Directory <- "Plink1" 
+shell(paste("plink --bfile EglZ_15 --out ",file," --make-bed --mind 0.5", sep="")) #filter max missingness per sample
+shell(paste("plink --bfile ",file," --het --out ",file, sep="")) #Generate average observed and expected homozygosity per Sample
+shell(paste("plink --bfile ",file," --out ",file," --recode --pca 90 --allow-no-sex", sep="")) #PCA
+
+#Read in file with sample IDs in column 1 and DNA sexing data in column 2
+Sexes <- read.table("C:\\Path\\to\\file\\Sexes_All.txt", header = TRUE)
+
+#Homozygosity calculation and plotting
+df<-read.table(paste("C:\\path\\to\\",Directory,"\\",file,".het", sep=""), header = TRUE)
+colnames(df)[2] <- "ID"
+df$divide <- df$O.HOM. / df$N.NM. #Calculate homozygosity
+df <- merge(df, Sexes, by="ID") #Merge with DNA sexing information
+library(ggplot2)
+ggplot(data=df, aes(divide, fill = Sex)) + geom_histogram(bins=40) +labs(title=file) + xlab("Proportion Homozygous") + scale_fill_manual(values = c("#DC267F",          "#648FFF"))
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 15)) +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10))
 ```
