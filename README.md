@@ -337,7 +337,7 @@ distruct.py -K 1 --input=NZSP1_structure  --popfile=Structure_stacks_g1.txt --ou
 Create minor allele frequency (MAF) distribution plots for UNEAK and Stacks datasets
 
 Packages: 
-* ggplot2
+* [ggplot2](https://ggplot2.tidyverse.org/)
 ```r
 #load in Gulf and North sample IDs for the dataset (UNEAK or Stacks)
 Gulf_Samples<-read.table("C:\\path\\to\\file\\Gulf_Samples.txt")
@@ -533,6 +533,9 @@ comm -12 <(sort NZSPEagle_Z_SNPs.txt) <(sort NZSPZebra_Z_SNPs.txt) > Zchr_SNPs_E
 ```
 ## Extracting and analysing Z-linked SNPs
 Putative Z-linked SNPs were analysed for homozygosity in NZSP individuals to see if sex could be bioinformatically determined, repeated for just eagle Z-linked SNPS and eagle/zebra finch Z-linked SNPs
+
+Packages:
+* [ggplot2](https://ggplot2.tidyverse.org/)
 ```r
 rm(list=ls())
 setwd("~/path/to/directory/Plink1")
