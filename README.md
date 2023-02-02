@@ -338,6 +338,7 @@ Create minor allele frequency (MAF) distribution plots for UNEAK and Stacks data
 
 Packages: 
 * [ggplot2](https://ggplot2.tidyverse.org/)
+* [egg](https://github.com/baptiste/egg)
 ```r
 #load in Gulf and North sample IDs for the dataset (UNEAK or Stacks)
 Gulf_Samples<-read.table("C:\\path\\to\\file\\Gulf_Samples.txt")
@@ -397,22 +398,46 @@ sd<- as.data.frame(Sd)
 mean<-sapply(CountsG,FUN=mean) #calculate the mean for all columns
 mean<-as.data.frame(mean)
 
-range<-c("0-0.05", "0.05-0.10", "0.10-0.15", "0.15-0.20", "0.20-0.25", "0.25-0.30", "0.30-0.35", "0.35-0.40","0.40-0.45", "0.45-0.50")
+range<-seq(0.05,0.5,0.05)
 data<-cbind(mean, range)
 data<-as.data.frame(data)
 data$mean<-as.numeric(data$mean)
 
-#Create histogram plots for each location using mean and standard deviation
+#Create histogram plot using mean and standard deviation
 library(ggplot2)
-ggplot(data) + 
-  geom_bar(aes(x=range, y=mean), fill="#E1BE6A", stat="identity", width=0.97) + 
-  geom_errorbar( aes(x=range, ymin=mean-sd$Sd, ymax=mean+sd$Sd), width=0.2, size=1) + 
-  labs(x="MAF", y="Frequency") + ggtitle("Hauraki Gulf")
+plot1<-ggplot(data) + 
+  geom_bar(aes(x=factor(range), y=mean), fill="#E1BE6A", stat="identity", width=0.97) + 
+  geom_errorbar( aes(x=factor(range), ymin=mean-sd$Sd, ymax=mean+sd$Sd), width=0.2, size=1) + 
+  labs(x="MAF", y="Frequency") + ggtitle("Hauraki Gulf") + theme(text = element_text(size = 18)) +
+  theme(plot.title = element_text(hjust = 0.5))
+plot1
 
-ggplot(data) + 
-  geom_bar(aes(x=range, y=mean), fill="#62A4DC", stat="identity", width=0.97) +
-  geom_errorbar( aes(x=range, ymin=mean-sd$Sd, ymax=mean+sd$Sd), width=0.2, size=1) +
-  labs(x="MAF", y="Frequency") + ggtitle("Far North")
+#Repeat for north samples
+Sd<- sapply(CountsN, FUN = sd) #calculate standard deviation for all columns 
+sd<- as.data.frame(Sd)
+mean<-sapply(CountsN,FUN=mean) #calculate the mean for all columns
+mean<-as.data.frame(mean)
+
+range<-seq(0.05,0.5,0.05)
+data<-cbind(mean, range)
+data<-as.data.frame(data)
+data$mean<-as.numeric(data$mean)
+
+plot2<-ggplot(data) + 
+  geom_bar(aes(x=factor(range), y=mean), fill="#62A4DC", stat="identity", width=0.97) +
+  geom_errorbar( aes(x=factor(range), ymin=mean-sd$Sd, ymax=mean+sd$Sd), width=0.2, size=1) +
+  labs(x="MAF", y="Frequency") + ggtitle("Far North") + theme(text = element_text(size = 18)) +
+  theme(plot.title = element_text(hjust = 0.5))
+plot2
+
+#Place graphs together with singular y axis
+library(egg)
+ggarrange(plot1 + theme( plot.margin = margin(r = 1) ), 
+          plot2 + 
+            theme(axis.text.y = element_blank(),
+                  axis.ticks.y = element_blank(),
+                  axis.title.y = element_blank() ),
+          nrow = 1, labels = c("A", "B"))
 ```
 # Kinship analysis
 ## Sequoia
