@@ -1,5 +1,6 @@
 # Population genomics of the threatened New Zealand storm petrel
 This repository contains details for the data processing and analyses used to investigate the population structure and genetic diversity of the New Zealand storm petrel (NZSP).
+The project was part of an Honours dissertation at University of Auckland. Published article based on this project is available at: https://doi.org/10.1007/s10592-023-01597-0
 ### Contents:
 * [DNA sequence processing with UNEAK](#dna-sequence-processing-with-uneak)
     * [Filtering with KGD](#filtering-with-kgd)
